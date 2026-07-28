@@ -1504,7 +1504,42 @@ public class JarvisService extends Service
             }
         }
     }
+    // ==========================================
+    // FORMAT REMINDER TIME
+    // ==========================================
 
+    private String formatTime(
+            int hour,
+            int minute
+    ) {
+
+        String period = "AM";
+
+        if (
+                hour >= 12
+        ) {
+
+            period = "PM";
+        }
+
+        int displayHour =
+                hour % 12;
+
+        if (
+                displayHour == 0
+        ) {
+
+            displayHour = 12;
+        }
+
+        return String.format(
+                Locale.US,
+                "%d:%02d %s",
+                displayHour,
+                minute,
+                period
+        );
+   
 
     // ==========================================
     // SERVICE DESTROYED
@@ -1540,4 +1575,40 @@ public class JarvisService extends Service
 
         return null;
     }
+// ==========================================
+// FORMAT REMINDER TIME
+// ==========================================
+
+private String formatTime(
+        int hour,
+        int minute
+) {
+
+    String period = "AM";
+
+    if (
+            hour >= 12
+    ) {
+
+        period = "PM";
+    }
+
+    int displayHour =
+            hour % 12;
+
+    if (
+            displayHour == 0
+    ) {
+
+        displayHour = 12;
+    }
+
+    return String.format(
+            Locale.US,
+            "%d:%02d %s",
+            displayHour,
+            minute,
+            period
+    );
+}
 }
