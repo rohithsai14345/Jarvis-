@@ -1539,7 +1539,7 @@ public class JarvisService extends Service
                 minute,
                 period
         );
-   
+   }
 
     // ==========================================
     // SERVICE DESTROYED
