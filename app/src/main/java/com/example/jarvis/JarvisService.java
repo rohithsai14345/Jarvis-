@@ -1,5 +1,6 @@
 package com.example.jarvis;
 
+import android.Manifest;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -9,22 +10,24 @@ import android.app.Service;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 
 import android.media.AudioManager;
 
 import android.os.Build;
 import android.os.Bundle;
-import android.os.IBinder;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
-
 import android.speech.tts.TextToSpeech;
 
 import android.view.KeyEvent;
+
+import androidx.core.content.ContextCompat;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -49,6 +52,8 @@ public class JarvisService extends Service
     private boolean isListening = false;
 
     private boolean isSpeaking = false;
+
+    private boolean serviceDestroyed = false;
 
     private SharedPreferences memory;
 
@@ -86,10 +91,11 @@ public class JarvisService extends Service
                         "Jarvis is running"
                 )
                 .setContentText(
-                        "Jarvis is ready to receive commands"
+                        "Jarvis is starting"
                 )
                 .setSmallIcon(
-                        android.R.drawable.ic_btn_speak_now
+                        android.R.drawable
+                                .ic_btn_speak_now
                 )
                 .setOngoing(true)
                 .build();
@@ -99,25 +105,76 @@ public class JarvisService extends Service
                 notification
         );
 
-
-        // TEXT TO SPEECH
+        // Start Text-to-Speech.
+        // Speech recognition starts only after
+        // Text-to-Speech is ready.
         textToSpeech =
                 new TextToSpeech(
                         this,
                         this
                 );
+    }
 
 
-        // SPEECH RECOGNIZER
-        setupSpeechRecognizer();
+    // ==========================================
+    // TEXT TO SPEECH INITIALIZED
+    // ==========================================
 
+    @Override
+    public void onInit(
+            int status
+    ) {
+
+        if (
+                status !=
+                        TextToSpeech.SUCCESS
+        ) {
+
+            return;
+        }
+
+        if (
+                textToSpeech == null
+        ) {
+
+            return;
+        }
+
+        int languageResult =
+                textToSpeech.setLanguage(
+                        Locale.US
+                );
+
+        if (
+                languageResult ==
+                        TextToSpeech
+                                .LANG_MISSING_DATA
+                ||
+                languageResult ==
+                        TextToSpeech
+                                .LANG_NOT_SUPPORTED
+        ) {
+
+            return;
+        }
 
         speak(
                 "Hello sir. I am ready."
         );
 
         handler.postDelayed(
-                () -> startListening(),
+                () -> {
+
+                    if (
+                            !serviceDestroyed
+                    ) {
+
+                        setupSpeechRecognizer();
+
+                        startListening();
+                    }
+
+                },
                 2500
         );
     }
@@ -130,134 +187,195 @@ public class JarvisService extends Service
     private void setupSpeechRecognizer() {
 
         if (
-                !SpeechRecognizer
-                        .isRecognitionAvailable(this)
+                serviceDestroyed
         ) {
 
             return;
         }
 
-        speechRecognizer =
-                SpeechRecognizer
-                        .createSpeechRecognizer(this);
+        if (
+                ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission
+                                .RECORD_AUDIO
+                )
+                !=
+                PackageManager
+                        .PERMISSION_GRANTED
+        ) {
 
-        speechIntent =
-                new Intent(
-                        RecognizerIntent
-                                .ACTION_RECOGNIZE_SPEECH
-                );
+            return;
+        }
 
-        speechIntent.putExtra(
-                RecognizerIntent
-                        .EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent
-                        .LANGUAGE_MODEL_FREE_FORM
-        );
+        if (
+                !SpeechRecognizer
+                        .isRecognitionAvailable(
+                                this
+                        )
+        ) {
 
-        speechIntent.putExtra(
-                RecognizerIntent
-                        .EXTRA_LANGUAGE,
-                Locale.getDefault()
-        );
+            speak(
+                    "Speech recognition is not available."
+            );
 
-        speechIntent.putExtra(
-                RecognizerIntent
-                        .EXTRA_PARTIAL_RESULTS,
-                false
-        );
+            return;
+        }
 
-        speechRecognizer.setRecognitionListener(
-                new RecognitionListener() {
+        try {
 
-                    @Override
-                    public void onReadyForSpeech(
-                            Bundle params
-                    ) {
+            if (
+                    speechRecognizer != null
+            ) {
 
-                        isListening = true;
-                    }
+                speechRecognizer.destroy();
 
-                    @Override
-                    public void onBeginningOfSpeech() {
-                    }
+                speechRecognizer = null;
+            }
 
-                    @Override
-                    public void onRmsChanged(
-                            float rmsdB
-                    ) {
-                    }
-
-                    @Override
-                    public void onBufferReceived(
-                            byte[] buffer
-                    ) {
-                    }
-
-                    @Override
-                    public void onEndOfSpeech() {
-
-                        isListening = false;
-                    }
-
-                    @Override
-                    public void onError(
-                            int error
-                    ) {
-
-                        isListening = false;
-
-                        handler.postDelayed(
-                                () -> startListening(),
-                                1500
-                        );
-                    }
-
-                    @Override
-                    public void onResults(
-                            Bundle results
-                    ) {
-
-                        isListening = false;
-
-                        ArrayList<String> matches =
-                                results.getStringArrayList(
-                                        SpeechRecognizer
-                                                .RESULTS_RECOGNITION
-                                );
-
-                        if (
-                                matches != null &&
-                                !matches.isEmpty()
-                        ) {
-
-                            String command =
-                                    matches.get(0);
-
-                            handleCommand(
-                                    command
+            speechRecognizer =
+                    SpeechRecognizer
+                            .createSpeechRecognizer(
+                                    this
                             );
-                        }
 
-                        handler.postDelayed(
-                                () -> startListening(),
-                                1200
-                        );
-                    }
+            speechIntent =
+                    new Intent(
+                            RecognizerIntent
+                                    .ACTION_RECOGNIZE_SPEECH
+                    );
 
-                    @Override
-                    public void onPartialResults(
-                            Bundle partialResults
-                    ) {
-                    }
+            speechIntent.putExtra(
+                    RecognizerIntent
+                            .EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent
+                            .LANGUAGE_MODEL_FREE_FORM
+            );
 
-                    @Override
-                    public void onEvent(
-                            int eventType,
-                            Bundle params
-                    ) {
-                    }
-                }
-        );
+            speechIntent.putExtra(
+                    RecognizerIntent
+                            .EXTRA_LANGUAGE,
+                    Locale.getDefault()
+            );
+
+            speechIntent.putExtra(
+                    RecognizerIntent
+                            .EXTRA_PARTIAL_RESULTS,
+                    false
+            );
+
+            speechIntent.putExtra(
+                    RecognizerIntent
+                            .EXTRA_MAX_RESULTS,
+                    1
+            );
+
+            speechRecognizer
+                    .setRecognitionListener(
+                            new RecognitionListener() {
+
+                                @Override
+                                public void onReadyForSpeech(
+                                        Bundle params
+                                ) {
+
+                                    isListening = true;
+                                }
+
+                                @Override
+                                public void onBeginningOfSpeech() {
+                                }
+
+                                @Override
+                                public void onRmsChanged(
+                                        float rmsdB
+                                ) {
+                                }
+
+                                @Override
+                                public void onBufferReceived(
+                                        byte[] buffer
+                                ) {
+                                }
+
+                                @Override
+                                public void onEndOfSpeech() {
+
+                                    isListening = false;
+                                }
+
+                                @Override
+                                public void onError(
+                                        int error
+                                ) {
+
+                                    isListening = false;
+
+                                    if (
+                                            !serviceDestroyed
+                                    ) {
+
+                                        handler.postDelayed(
+                                                () ->
+                                                        startListening(),
+                                                1500
+                                        );
+                                    }
+                                }
+
+                                @Override
+                                public void onResults(
+                                        Bundle results
+                                ) {
+
+                                    isListening = false;
+
+                                    ArrayList<String>
+                                            matches =
+                                            results
+                                                    .getStringArrayList(
+                                                            SpeechRecognizer
+                                                                    .RESULTS_RECOGNITION
+                                                    );
+
+                                    if (
+                                            matches != null
+                                            &&
+                                            !matches.isEmpty()
+                                    ) {
+
+                                        handleCommand(
+                                                matches.get(0)
+                                        );
+
+                                    } else {
+
+                                        scheduleListening(
+                                                1200
+                                        );
+                                    }
+                                }
+
+                                @Override
+                                public void onPartialResults(
+                                        Bundle partialResults
+                                ) {
+                                }
+
+                                @Override
+                                public void onEvent(
+                                        int eventType,
+                                        Bundle params
+                                ) {
+                                }
+                            }
+                    );
+
+        } catch (
+                Exception e
+        ) {
+
+            e.printStackTrace();
+        }
     }
 
 
@@ -268,8 +386,33 @@ public class JarvisService extends Service
     private void startListening() {
 
         if (
-                speechRecognizer == null ||
-                isListening ||
+                serviceDestroyed
+        ) {
+
+            return;
+        }
+
+        if (
+                ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission
+                                .RECORD_AUDIO
+                )
+                !=
+                PackageManager
+                        .PERMISSION_GRANTED
+        ) {
+
+            return;
+        }
+
+        if (
+                speechRecognizer == null
+                ||
+                speechIntent == null
+                ||
+                isListening
+                ||
                 isSpeaking
         ) {
 
@@ -278,17 +421,47 @@ public class JarvisService extends Service
 
         try {
 
-            speechRecognizer.startListening(
-                    speechIntent
-            );
+            speechRecognizer
+                    .startListening(
+                            speechIntent
+                    );
 
-        } catch (Exception e) {
+        } catch (
+                Exception e
+        ) {
 
-            handler.postDelayed(
-                    () -> startListening(),
+            isListening = false;
+
+            e.printStackTrace();
+
+            scheduleListening(
                     2000
             );
         }
+    }
+
+
+    // ==========================================
+    // SCHEDULE LISTENING
+    // ==========================================
+
+    private void scheduleListening(
+            long delay
+    ) {
+
+        if (
+                handler == null
+                ||
+                serviceDestroyed
+        ) {
+
+            return;
+        }
+
+        handler.postDelayed(
+                () -> startListening(),
+                delay
+        );
     }
 
 
@@ -300,15 +473,30 @@ public class JarvisService extends Service
             String command
     ) {
 
+        if (
+                command == null
+        ) {
+
+            scheduleListening(
+                    1000
+            );
+
+            return;
+        }
+
         command =
                 command.toLowerCase(
                         Locale.ROOT
-                ).trim();
+                )
+                .trim();
 
 
-        // TIMED REMINDER FIRST
+        // TIMED REMINDER
+
         if (
-                handleTimedReminder(command)
+                handleTimedReminder(
+                        command
+                )
         ) {
 
             return;
@@ -316,12 +504,27 @@ public class JarvisService extends Service
 
 
         // GREETING
+
         if (
-                command.equals("hey jarvis") ||
-                command.equals("hello jarvis") ||
-                command.equals("jarvis") ||
-                command.equals("hello") ||
-                command.equals("hi")
+                command.equals(
+                        "hey jarvis"
+                )
+                ||
+                command.equals(
+                        "hello jarvis"
+                )
+                ||
+                command.equals(
+                        "jarvis"
+                )
+                ||
+                command.equals(
+                        "hello"
+                )
+                ||
+                command.equals(
+                        "hi"
+                )
         ) {
 
             speak(
@@ -331,29 +534,47 @@ public class JarvisService extends Service
 
 
         // TIME
+
         else if (
-                command.contains("time")
+                command.contains(
+                        "time"
+                )
         ) {
 
-            java.time.LocalTime time =
-                    java.time.LocalTime.now(
-                            java.time.ZoneId.of(
-                                    "Asia/Kolkata"
-                            )
-                    )
-                    .withNano(0);
+            Calendar calendar =
+                    Calendar.getInstance();
+
+            int hour =
+                    calendar.get(
+                            Calendar.HOUR_OF_DAY
+                    );
+
+            int minute =
+                    calendar.get(
+                            Calendar.MINUTE
+                    );
 
             speak(
                     "The current time is "
-                            + time
+                            +
+                    formatTime(
+                            hour,
+                            minute
+                    )
             );
         }
 
 
         // DATE
+
         else if (
-                command.contains("date") ||
-                command.contains("today")
+                command.contains(
+                        "date"
+                )
+                ||
+                command.contains(
+                        "today"
+                )
         ) {
 
             java.time.LocalDate date =
@@ -365,12 +586,14 @@ public class JarvisService extends Service
 
             speak(
                     "Today is "
-                            + date
+                            +
+                    date
             );
         }
 
 
         // SHOW REMINDERS
+
         else if (
                 command.contains(
                         "show my reminders"
@@ -390,6 +613,7 @@ public class JarvisService extends Service
 
 
         // CLEAR ALL REMINDERS
+
         else if (
                 command.contains(
                         "clear all reminders"
@@ -405,6 +629,7 @@ public class JarvisService extends Service
 
 
         // SIMPLE REMINDER
+
         else if (
                 command.startsWith(
                         "remind me to "
@@ -418,17 +643,29 @@ public class JarvisService extends Service
                     )
                     .trim();
 
-            saveSimpleReminder(
-                    reminder
-            );
+            if (
+                    reminder.isEmpty()
+            ) {
 
-            speak(
-                    "Okay sir. I saved your reminder."
-            );
+                speak(
+                        "Please tell me what to remember."
+                );
+
+            } else {
+
+                saveSimpleReminder(
+                        reminder
+                );
+
+                speak(
+                        "Okay sir. I saved your reminder."
+                );
+            }
         }
 
 
         // CLEAR SIMPLE REMINDER
+
         else if (
                 command.contains(
                         "clear my reminder"
@@ -440,7 +677,9 @@ public class JarvisService extends Service
         ) {
 
             memory.edit()
-                    .remove("reminder")
+                    .remove(
+                            "reminder"
+                    )
                     .apply();
 
             speak(
@@ -450,8 +689,11 @@ public class JarvisService extends Service
 
 
         // PAUSE MUSIC
+
         else if (
-                command.equals("pause")
+                command.equals(
+                        "pause"
+                )
                 ||
                 command.contains(
                         "pause music"
@@ -459,7 +701,8 @@ public class JarvisService extends Service
         ) {
 
             controlMusic(
-                    KeyEvent.KEYCODE_MEDIA_PAUSE
+                    KeyEvent
+                            .KEYCODE_MEDIA_PAUSE
             );
 
             speak(
@@ -469,8 +712,11 @@ public class JarvisService extends Service
 
 
         // RESUME MUSIC
+
         else if (
-                command.equals("resume")
+                command.equals(
+                        "resume"
+                )
                 ||
                 command.contains(
                         "resume music"
@@ -482,7 +728,8 @@ public class JarvisService extends Service
         ) {
 
             controlMusic(
-                    KeyEvent.KEYCODE_MEDIA_PLAY
+                    KeyEvent
+                            .KEYCODE_MEDIA_PLAY
             );
 
             speak(
@@ -492,8 +739,11 @@ public class JarvisService extends Service
 
 
         // NEXT SONG
+
         else if (
-                command.equals("next")
+                command.equals(
+                        "next"
+                )
                 ||
                 command.contains(
                         "next song"
@@ -501,7 +751,8 @@ public class JarvisService extends Service
         ) {
 
             controlMusic(
-                    KeyEvent.KEYCODE_MEDIA_NEXT
+                    KeyEvent
+                            .KEYCODE_MEDIA_NEXT
             );
 
             speak(
@@ -511,8 +762,11 @@ public class JarvisService extends Service
 
 
         // PREVIOUS SONG
+
         else if (
-                command.equals("previous")
+                command.equals(
+                        "previous"
+                )
                 ||
                 command.contains(
                         "previous song"
@@ -520,7 +774,8 @@ public class JarvisService extends Service
         ) {
 
             controlMusic(
-                    KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                    KeyEvent
+                            .KEYCODE_MEDIA_PREVIOUS
             );
 
             speak(
@@ -529,7 +784,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN INSTAGRAM
+        // INSTAGRAM
+
         else if (
                 command.equals(
                         "open instagram"
@@ -547,7 +803,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN YOUTUBE
+        // YOUTUBE
+
         else if (
                 command.equals(
                         "open youtube"
@@ -565,7 +822,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN WHATSAPP
+        // WHATSAPP
+
         else if (
                 command.equals(
                         "open whatsapp"
@@ -583,7 +841,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN SPOTIFY
+        // SPOTIFY
+
         else if (
                 command.equals(
                         "open spotify"
@@ -601,7 +860,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN CHROME
+        // CHROME
+
         else if (
                 command.equals(
                         "open chrome"
@@ -619,7 +879,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN SETTINGS
+        // SETTINGS
+
         else if (
                 command.equals(
                         "open settings"
@@ -637,7 +898,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN CHATGPT
+        // CHATGPT
+
         else if (
                 command.contains(
                         "chatgpt"
@@ -655,7 +917,8 @@ public class JarvisService extends Service
         }
 
 
-        // OPEN GOOGLE
+        // GOOGLE
+
         else if (
                 command.equals(
                         "open google"
@@ -674,6 +937,7 @@ public class JarvisService extends Service
 
 
         // THANKS
+
         else if (
                 command.contains(
                         "thank you"
@@ -691,6 +955,7 @@ public class JarvisService extends Service
 
 
         // HOW ARE YOU
+
         else if (
                 command.contains(
                         "how are you"
@@ -704,6 +969,7 @@ public class JarvisService extends Service
 
 
         // WHO ARE YOU
+
         else if (
                 command.contains(
                         "who are you"
@@ -717,6 +983,7 @@ public class JarvisService extends Service
 
 
         // GO BACK
+
         else if (
                 command.equals(
                         "go back"
@@ -736,6 +1003,7 @@ public class JarvisService extends Service
 
 
         // UNKNOWN COMMAND
+
         else {
 
             speak(
@@ -783,7 +1051,8 @@ public class JarvisService extends Service
         int minute = 0;
 
         if (
-                matcher.group(3) != null
+                matcher.group(3)
+                        != null
         ) {
 
             minute =
@@ -825,9 +1094,12 @@ public class JarvisService extends Service
 
 
         if (
-                hour < 0 ||
-                hour > 23 ||
-                minute < 0 ||
+                hour < 0
+                ||
+                hour > 23
+                ||
+                minute < 0
+                ||
                 minute > 59
         ) {
 
@@ -863,8 +1135,10 @@ public class JarvisService extends Service
 
             int reminderId =
                     (int)
-                            (System.currentTimeMillis()
-                                    / 1000);
+                            (
+                                    System.currentTimeMillis()
+                                            / 1000
+                            );
 
             Intent intent =
                     new Intent(
@@ -888,9 +1162,11 @@ public class JarvisService extends Service
                             this,
                             reminderId,
                             intent,
-                            PendingIntent.FLAG_UPDATE_CURRENT
+                            PendingIntent
+                                    .FLAG_UPDATE_CURRENT
                                     |
-                            PendingIntent.FLAG_IMMUTABLE
+                            PendingIntent
+                                    .FLAG_IMMUTABLE
                     );
 
 
@@ -942,38 +1218,29 @@ public class JarvisService extends Service
             ) {
 
                 if (
-                        Build.VERSION.SDK_INT >=
-                                Build.VERSION_CODES.S
+                        Build.VERSION.SDK_INT
+                                >=
+                        Build.VERSION_CODES.S
+                        &&
+                        alarmManager
+                                .canScheduleExactAlarms()
                 ) {
 
-                    if (
-                            alarmManager
-                                    .canScheduleExactAlarms()
-                    ) {
-
-                        alarmManager
-                                .setExactAndAllowWhileIdle(
-                                        AlarmManager
-                                                .RTC_WAKEUP,
-                                        calendar
-                                                .getTimeInMillis(),
-                                        pendingIntent
-                                );
-
-                    } else {
-
-                        alarmManager.setAndAllowWhileIdle(
-                                AlarmManager.RTC_WAKEUP,
-                                calendar.getTimeInMillis(),
-                                pendingIntent
-                        );
-                    }
+                    alarmManager
+                            .setExactAndAllowWhileIdle(
+                                    AlarmManager
+                                            .RTC_WAKEUP,
+                                    calendar
+                                            .getTimeInMillis(),
+                                    pendingIntent
+                            );
 
                 } else {
 
                     alarmManager
-                            .setExactAndAllowWhileIdle(
-                                    AlarmManager.RTC_WAKEUP,
+                            .setAndAllowWhileIdle(
+                                    AlarmManager
+                                            .RTC_WAKEUP,
                                     calendar
                                             .getTimeInMillis(),
                                     pendingIntent
@@ -990,15 +1257,18 @@ public class JarvisService extends Service
 
             speak(
                     "Okay sir. I will remind you at "
-                            + formatTime(
-                                    hour,
-                                    minute
-                            )
+                            +
+                    formatTime(
+                            hour,
+                            minute
+                    )
             );
 
         } catch (
                 Exception e
         ) {
+
+            e.printStackTrace();
 
             speak(
                     "I could not set the reminder, sir."
@@ -1029,8 +1299,10 @@ public class JarvisService extends Service
 
         updatedReminders.add(
                 reminderId
-                        + "|"
-                        + reminderText
+                        +
+                "|"
+                        +
+                reminderText
         );
 
         memory.edit()
@@ -1079,16 +1351,21 @@ public class JarvisService extends Service
 
 
         if (
+                reminders == null
+                ||
                 reminders.isEmpty()
-                &&
-                simpleReminder.isEmpty()
         ) {
 
-            speak(
-                    "You have no saved reminders, sir."
-            );
+            if (
+                    simpleReminder.isEmpty()
+            ) {
 
-            return;
+                speak(
+                        "You have no saved reminders, sir."
+                );
+
+                return;
+            }
         }
 
 
@@ -1098,24 +1375,32 @@ public class JarvisService extends Service
                 );
 
 
-        for (
-                String reminder : reminders
+        if (
+                reminders != null
         ) {
 
-            String[] parts =
-                    reminder.split(
-                            "\\|",
-                            2
-                    );
-
-            if (
-                    parts.length == 2
+            for (
+                    String reminder :
+                    reminders
             ) {
 
-                result.append(
-                        parts[1]
-                )
-                .append(". ");
+                String[] parts =
+                        reminder.split(
+                                "\\|",
+                                2
+                        );
+
+                if (
+                        parts.length == 2
+                ) {
+
+                    result.append(
+                            parts[1]
+                    )
+                    .append(
+                            ". "
+                    );
+                }
             }
         }
 
@@ -1127,7 +1412,9 @@ public class JarvisService extends Service
             result.append(
                     simpleReminder
             )
-            .append(". ");
+            .append(
+                    ". "
+            );
         }
 
 
@@ -1157,6 +1444,8 @@ public class JarvisService extends Service
 
 
         if (
+                reminders != null
+                &&
                 alarmManager != null
         ) {
 
@@ -1196,9 +1485,11 @@ public class JarvisService extends Service
                                     this,
                                     reminderId,
                                     intent,
-                                    PendingIntent.FLAG_UPDATE_CURRENT
+                                    PendingIntent
+                                            .FLAG_UPDATE_CURRENT
                                             |
-                                    PendingIntent.FLAG_IMMUTABLE
+                                    PendingIntent
+                                            .FLAG_IMMUTABLE
                             );
 
                     alarmManager.cancel(
@@ -1218,8 +1509,12 @@ public class JarvisService extends Service
 
 
         memory.edit()
-                .remove("reminders")
-                .remove("reminder")
+                .remove(
+                        "reminders"
+                )
+                .remove(
+                        "reminder"
+                )
                 .apply();
 
 
@@ -1251,7 +1546,8 @@ public class JarvisService extends Service
             ) {
 
                 launchIntent.addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK
+                        Intent
+                                .FLAG_ACTIVITY_NEW_TASK
                 );
 
                 startActivity(
@@ -1260,15 +1556,18 @@ public class JarvisService extends Service
 
                 speak(
                         "Opening "
-                                + appName
-                                + "."
+                                +
+                        appName
+                                +
+                        "."
                 );
 
             } else {
 
                 speak(
                         appName
-                                + " is not installed."
+                                +
+                        " is not installed."
                 );
             }
 
@@ -1278,7 +1577,8 @@ public class JarvisService extends Service
 
             speak(
                     "I could not open "
-                            + appName
+                            +
+                    appName
             );
         }
     }
@@ -1307,7 +1607,8 @@ public class JarvisService extends Service
             );
 
             intent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK
+                    Intent
+                            .FLAG_ACTIVITY_NEW_TASK
             );
 
             startActivity(
@@ -1316,8 +1617,10 @@ public class JarvisService extends Service
 
             speak(
                     "Opening "
-                            + name
-                            + "."
+                            +
+                    name
+                            +
+                    "."
             );
 
         } catch (
@@ -1326,7 +1629,8 @@ public class JarvisService extends Service
 
             speak(
                     "I could not open "
-                            + name
+                            +
+                    name
             );
         }
     }
@@ -1340,48 +1644,53 @@ public class JarvisService extends Service
             String text
     ) {
 
+        if (
+                serviceDestroyed
+        ) {
+
+            return;
+        }
+
         isSpeaking = true;
 
         if (
                 textToSpeech != null
         ) {
 
-            textToSpeech.speak(
-                    text,
-                    TextToSpeech.QUEUE_FLUSH,
-                    null,
-                    "JARVIS_SPEECH"
-            );
+            try {
+
+                textToSpeech.speak(
+                        text,
+                        TextToSpeech
+                                .QUEUE_FLUSH,
+                        null,
+                        "JARVIS_SPEECH"
+                );
+
+            } catch (
+                    Exception e
+            ) {
+
+                e.printStackTrace();
+            }
         }
 
 
         handler.postDelayed(
                 () -> {
 
-                    isSpeaking = false;
+                    if (
+                            !serviceDestroyed
+                    ) {
 
-                    startListening();
+                        isSpeaking = false;
+
+                        startListening();
+                    }
 
                 },
-                2000
+                2500
         );
-    }
-
-
-    @Override
-    public void onInit(
-            int status
-    ) {
-
-        if (
-                status ==
-                        TextToSpeech.SUCCESS
-        ) {
-
-            textToSpeech.setLanguage(
-                    Locale.US
-            );
-        }
     }
 
 
@@ -1400,6 +1709,13 @@ public class JarvisService extends Service
                             getSystemService(
                                     AUDIO_SERVICE
                             );
+
+            if (
+                    audioManager == null
+            ) {
+
+                return;
+            }
 
             long eventTime =
                     android.os.SystemClock
@@ -1426,13 +1742,15 @@ public class JarvisService extends Service
                     );
 
 
-            audioManager.dispatchMediaKeyEvent(
-                    downEvent
-            );
+            audioManager
+                    .dispatchMediaKeyEvent(
+                            downEvent
+                    );
 
-            audioManager.dispatchMediaKeyEvent(
-                    upEvent
-            );
+            audioManager
+                    .dispatchMediaKeyEvent(
+                            upEvent
+                    );
 
         } catch (
                 Exception e
@@ -1461,7 +1779,8 @@ public class JarvisService extends Service
         );
 
         intent.setFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK
+                Intent
+                        .FLAG_ACTIVITY_NEW_TASK
         );
 
         startActivity(
@@ -1477,8 +1796,9 @@ public class JarvisService extends Service
     private void createNotificationChannel() {
 
         if (
-                Build.VERSION.SDK_INT >=
-                        Build.VERSION_CODES.O
+                Build.VERSION.SDK_INT
+                        >=
+                Build.VERSION_CODES.O
         ) {
 
             NotificationChannel channel =
@@ -1498,14 +1818,17 @@ public class JarvisService extends Service
                     manager != null
             ) {
 
-                manager.createNotificationChannel(
-                        channel
-                );
+                manager
+                        .createNotificationChannel(
+                                channel
+                        );
             }
         }
     }
+
+
     // ==========================================
-    // FORMAT REMINDER TIME
+    // FORMAT TIME
     // ==========================================
 
     private String formatTime(
@@ -1513,13 +1836,15 @@ public class JarvisService extends Service
             int minute
     ) {
 
-        String period = "AM";
+        String period =
+                "AM";
 
         if (
                 hour >= 12
         ) {
 
-            period = "PM";
+            period =
+                    "PM";
         }
 
         int displayHour =
@@ -1539,7 +1864,8 @@ public class JarvisService extends Service
                 minute,
                 period
         );
-   }
+    }
+
 
     // ==========================================
     // SERVICE DESTROYED
@@ -1548,25 +1874,86 @@ public class JarvisService extends Service
     @Override
     public void onDestroy() {
 
+        serviceDestroyed = true;
+
+        isListening = false;
+
+        isSpeaking = false;
+
+        if (
+                handler != null
+        ) {
+
+            handler
+                    .removeCallbacksAndMessages(
+                            null
+                    );
+        }
+
         if (
                 speechRecognizer != null
         ) {
 
-            speechRecognizer.destroy();
+            try {
+
+                speechRecognizer.cancel();
+
+                speechRecognizer.destroy();
+
+            } catch (
+                    Exception e
+            ) {
+
+                e.printStackTrace();
+            }
+
+            speechRecognizer = null;
         }
 
         if (
                 textToSpeech != null
         ) {
 
-            textToSpeech.stop();
+            try {
 
-            textToSpeech.shutdown();
+                textToSpeech.stop();
+
+                textToSpeech.shutdown();
+
+            } catch (
+                    Exception e
+            ) {
+
+                e.printStackTrace();
+            }
+
+            textToSpeech = null;
+        }
+
+        if (
+                Build.VERSION.SDK_INT
+                        >=
+                Build.VERSION_CODES.N
+        ) {
+
+            stopForeground(
+                    STOP_FOREGROUND_REMOVE
+            );
+
+        } else {
+
+            stopForeground(
+                    true
+            );
         }
 
         super.onDestroy();
     }
 
+
+    // ==========================================
+    // SERVICE BINDING
+    // ==========================================
 
     @Override
     public IBinder onBind(
@@ -1575,5 +1962,4 @@ public class JarvisService extends Service
 
         return null;
     }
-
 }
