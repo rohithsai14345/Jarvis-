@@ -1,29 +1,32 @@
 package com.example.jarvis;
 
-import android.Manifest;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
+
 import android.media.AudioManager;
+
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+
 import android.speech.tts.TextToSpeech;
+
 import android.view.KeyEvent;
 
-import androidx.core.content.ContextCompat;
-
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashSet;
@@ -33,97 +36,161 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class JarvisService extends Service
-implements TextToSpeech.OnInitListener {
+        implements TextToSpeech.OnInitListener {
 
-private static final String CHANNEL_ID =
-        "JARVIS_SERVICE_CHANNEL";
+    private static final String CHANNEL_ID =
+            "JARVIS_SERVICE_CHANNEL";
 
-private SpeechRecognizer speechRecognizer;
-private TextToSpeech textToSpeech;
-private Intent speechIntent;
+    private SpeechRecognizer speechRecognizer;
 
-private boolean isListening = false;
-private boolean isSpeaking = false;
-private boolean serviceDestroyed = false;
+    private TextToSpeech textToSpeech;
 
-private SharedPreferences memory;
-private Handler handler;
+    private Intent speechIntent;
 
-@Override
-public void onCreate() {
+    private boolean isListening = false;
 
-    super.onCreate();
+    private boolean isSpeaking = false;
 
-    memory = getSharedPreferences(
-            "JarvisMemory",
-            MODE_PRIVATE
-    );
+    private boolean serviceRunning = false;
 
-    handler = new Handler(
-            Looper.getMainLooper()
-    );
+    private SharedPreferences memory;
 
-    createNotificationChannel();
+    private Handler handler;
 
-    Notification notification =
-            new Notification.Builder(
-                    this,
-                    CHANNEL_ID
-            )
-            .setContentTitle(
-                    "Jarvis is running"
-            )
-            .setContentText(
-                    "Jarvis is ready"
-            )
-            .setSmallIcon(
-                    android.R.drawable.ic_btn_speak_now
-            )
-            .setOngoing(true)
-            .build();
 
-    startForeground(
-            1001,
-            notification
-    );
+    // ==========================================
+    // SERVICE CREATED
+    // ==========================================
 
-    textToSpeech =
-            new TextToSpeech(
-                    this,
-                    this
-            );
+    @Override
+    public void onCreate() {
 
-    if (
-            ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.RECORD_AUDIO
-            )
-                    ==
-            PackageManager.PERMISSION_GRANTED
-    ) {
+        super.onCreate();
+
+        // IMPORTANT:
+        // Initialize these before using them.
+
+        handler =
+                new Handler(
+                        Looper.getMainLooper()
+                );
+
+        memory =
+                getSharedPreferences(
+                        "JarvisMemory",
+                        MODE_PRIVATE
+                );
+
+        createNotificationChannel();
+
+        Notification notification;
+
+        if (
+                Build.VERSION.SDK_INT >=
+                        Build.VERSION_CODES.O
+        ) {
+
+            notification =
+                    new Notification.Builder(
+                            this,
+                            CHANNEL_ID
+                    )
+                    .setContentTitle(
+                            "Jarvis is running"
+                    )
+                    .setContentText(
+                            "Listening for your commands"
+                    )
+                    .setSmallIcon(
+                            android.R.drawable
+                                    .ic_dialog_info
+                    )
+                    .setOngoing(true)
+                    .build();
+
+        } else {
+
+            notification =
+                    new Notification.Builder(
+                            this
+                    )
+                    .setContentTitle(
+                            "Jarvis is running"
+                    )
+                    .setContentText(
+                            "Listening for your commands"
+                    )
+                    .setSmallIcon(
+                            android.R.drawable
+                                    .ic_dialog_info
+                    )
+                    .setOngoing(true)
+                    .build();
+        }
+
+        startForeground(
+                1001,
+                notification
+        );
+
+        // Initialize text to speech.
+
+        textToSpeech =
+                new TextToSpeech(
+                        this,
+                        this
+                );
+
+        // Initialize speech recognition.
 
         setupSpeechRecognizer();
 
+        serviceRunning = true;
+
+        // Start listening after a small delay.
+
+        handler.postDelayed(
+                new Runnable() {
+
+                    @Override
+                    public void run() {
+
+                        startListening();
+                    }
+                },
+                1000
+        );
     }
-}
 
-@Override
-public int onStartCommand(
-        Intent intent,
-        int flags,
-        int startId
-) {
 
-    return START_STICKY;
-}
+    // ==========================================
+    // SERVICE START COMMAND
+    // ==========================================
 
-private void setupSpeechRecognizer() {
+    @Override
+    public int onStartCommand(
+            Intent intent,
+            int flags,
+            int startId
+    ) {
 
-    try {
+        serviceRunning = true;
+
+        return START_STICKY;
+    }
+
+
+    // ==========================================
+    // SETUP SPEECH RECOGNIZER
+    // ==========================================
+
+    private void setupSpeechRecognizer() {
 
         if (
                 !SpeechRecognizer
-                        .isRecognitionAvailable(this)
+                        .isRecognitionAvailable(
+                                this
+                        )
         ) {
 
             return;
@@ -131,7 +198,9 @@ private void setupSpeechRecognizer() {
 
         speechRecognizer =
                 SpeechRecognizer
-                        .createSpeechRecognizer(this);
+                        .createSpeechRecognizer(
+                                this
+                        );
 
         speechIntent =
                 new Intent(
@@ -149,13 +218,20 @@ private void setupSpeechRecognizer() {
         speechIntent.putExtra(
                 RecognizerIntent
                         .EXTRA_LANGUAGE,
-                Locale.US
+                Locale.getDefault()
+                        .toLanguageTag()
         );
 
         speechIntent.putExtra(
                 RecognizerIntent
                         .EXTRA_PARTIAL_RESULTS,
                 false
+        );
+
+        speechIntent.putExtra(
+                RecognizerIntent
+                        .EXTRA_MAX_RESULTS,
+                1
         );
 
         speechRecognizer.setRecognitionListener(
@@ -169,9 +245,11 @@ private void setupSpeechRecognizer() {
                         isListening = true;
                     }
 
+
                     @Override
                     public void onBeginningOfSpeech() {
                     }
+
 
                     @Override
                     public void onRmsChanged(
@@ -179,17 +257,20 @@ private void setupSpeechRecognizer() {
                     ) {
                     }
 
+
                     @Override
                     public void onBufferReceived(
                             byte[] buffer
                     ) {
                     }
 
+
                     @Override
                     public void onEndOfSpeech() {
 
                         isListening = false;
                     }
+
 
                     @Override
                     public void onError(
@@ -199,15 +280,23 @@ private void setupSpeechRecognizer() {
                         isListening = false;
 
                         if (
-                                !serviceDestroyed
+                                serviceRunning
                         ) {
 
                             handler.postDelayed(
-                                    () -> startListening(),
-                                    2000
+                                    new Runnable() {
+
+                                        @Override
+                                        public void run() {
+
+                                            startListening();
+                                        }
+                                    },
+                                    1500
                             );
                         }
                     }
+
 
                     @Override
                     public void onResults(
@@ -217,10 +306,11 @@ private void setupSpeechRecognizer() {
                         isListening = false;
 
                         ArrayList<String> matches =
-                                results.getStringArrayList(
-                                        SpeechRecognizer
-                                                .RESULTS_RECOGNITION
-                                );
+                                results
+                                        .getStringArrayList(
+                                                SpeechRecognizer
+                                                        .RESULTS_RECOGNITION
+                                        );
 
                         if (
                                 matches != null
@@ -231,24 +321,32 @@ private void setupSpeechRecognizer() {
                             handleCommand(
                                     matches.get(0)
                             );
-                        }
 
-                        if (
-                                !serviceDestroyed
+                        } else if (
+                                serviceRunning
                         ) {
 
                             handler.postDelayed(
-                                    () -> startListening(),
-                                    1500
+                                    new Runnable() {
+
+                                        @Override
+                                        public void run() {
+
+                                            startListening();
+                                        }
+                                    },
+                                    1000
                             );
                         }
                     }
+
 
                     @Override
                     public void onPartialResults(
                             Bundle partialResults
                     ) {
                     }
+
 
                     @Override
                     public void onEvent(
@@ -258,399 +356,642 @@ private void setupSpeechRecognizer() {
                     }
                 }
         );
-
-    } catch (
-            Exception e
-    ) {
-
-        speechRecognizer = null;
-    }
-}
-
-private void startListening() {
-
-    if (
-            serviceDestroyed
-            ||
-            speechRecognizer == null
-            ||
-            speechIntent == null
-            ||
-            isListening
-            ||
-            isSpeaking
-    ) {
-
-        return;
     }
 
-    if (
-            ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.RECORD_AUDIO
-            )
-                    !=
-            PackageManager.PERMISSION_GRANTED
-    ) {
 
-        return;
-    }
+    // ==========================================
+    // START LISTENING
+    // ==========================================
 
-    try {
-
-        speechRecognizer.startListening(
-                speechIntent
-        );
-
-    } catch (
-            Exception e
-    ) {
-
-        isListening = false;
+    private void startListening() {
 
         if (
-                !serviceDestroyed
+                !serviceRunning
+                ||
+                speechRecognizer == null
+                ||
+                speechIntent == null
+                ||
+                isListening
+                ||
+                isSpeaking
         ) {
 
-            handler.postDelayed(
-                    () -> startListening(),
-                    2500
-            );
+            return;
         }
-    }
-}
 
-private void handleCommand(
-        String command
-) {
+        try {
 
-    command =
-            command.toLowerCase(
-                    Locale.ROOT
-            )
-            .trim();
-
-    if (
-            handleTimedReminder(command)
-    ) {
-
-        return;
-    }
-
-    if (
-            command.equals("jarvis")
-            ||
-            command.equals("hello jarvis")
-            ||
-            command.equals("hey jarvis")
-    ) {
-
-        speak(
-                "Yes sir. How can I help you?"
-        );
-
-    } else if (
-            command.contains("time")
-    ) {
-
-        Calendar calendar =
-                Calendar.getInstance();
-
-        speak(
-                "The time is "
-                        +
-                formatTime(
-                        calendar.get(
-                                Calendar.HOUR_OF_DAY
-                        ),
-                        calendar.get(
-                                Calendar.MINUTE
-                        )
-                )
-        );
-
-    } else if (
-            command.contains("date")
-            ||
-            command.contains("today")
-    ) {
-
-        speak(
-                "Today is "
-                        +
-                java.text.DateFormat
-                        .getDateInstance(
-                                java.text.DateFormat.LONG
-                        )
-                        .format(
-                                new java.util.Date()
-                        )
-        );
-
-    } else if (
-            command.contains(
-                    "show my reminders"
-            )
-    ) {
-
-        showReminders();
-
-    } else if (
-            command.contains(
-                    "clear all reminders"
-            )
-    ) {
-
-        clearAllReminders();
-
-    } else if (
-            command.startsWith(
-                    "remind me to "
-            )
-    ) {
-
-        String reminder =
-                command.substring(
-                        "remind me to ".length()
-                )
-                .trim();
-
-        saveSimpleReminder(
-                reminder
-        );
-
-        speak(
-                "Reminder saved."
-        );
-
-    } else if (
-            command.contains("open youtube")
-    ) {
-
-        openApp(
-                "com.google.android.youtube",
-                "YouTube"
-        );
-
-    } else if (
-            command.contains("open whatsapp")
-    ) {
-
-        openApp(
-                "com.whatsapp",
-                "WhatsApp"
-        );
-
-    } else if (
-            command.contains("open spotify")
-    ) {
-
-        openApp(
-                "com.spotify.music",
-                "Spotify"
-        );
-
-    } else if (
-            command.contains("open chrome")
-    ) {
-
-        openApp(
-                "com.android.chrome",
-                "Chrome"
-        );
-
-    } else if (
-            command.contains("open instagram")
-    ) {
-
-        openApp(
-                "com.instagram.android",
-                "Instagram"
-        );
-
-    } else if (
-            command.contains("pause")
-    ) {
-
-        controlMusic(
-                KeyEvent.KEYCODE_MEDIA_PAUSE
-        );
-
-        speak(
-                "Music paused."
-        );
-
-    } else if (
-            command.contains("resume")
-            ||
-            command.contains("continue")
-    ) {
-
-        controlMusic(
-                KeyEvent.KEYCODE_MEDIA_PLAY
-        );
-
-        speak(
-                "Music resumed."
-        );
-
-    } else if (
-            command.contains("next song")
-    ) {
-
-        controlMusic(
-                KeyEvent.KEYCODE_MEDIA_NEXT
-        );
-
-    } else if (
-            command.contains("previous song")
-    ) {
-
-        controlMusic(
-                KeyEvent.KEYCODE_MEDIA_PREVIOUS
-        );
-
-    } else if (
-            command.contains("thank")
-    ) {
-
-        speak(
-                "You are welcome."
-        );
-
-    } else {
-
-        speak(
-                "I do not understand that command yet."
-        );
-    }
-}
-
-private boolean handleTimedReminder(
-        String command
-) {
-
-    Pattern pattern =
-            Pattern.compile(
-                    "remind me to (.+) at (\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?",
-                    Pattern.CASE_INSENSITIVE
+            speechRecognizer.startListening(
+                    speechIntent
             );
 
-    Matcher matcher =
-            pattern.matcher(
-                    command
-            );
+        } catch (
+                Exception e
+        ) {
 
-    if (
-            !matcher.matches()
-    ) {
+            isListening = false;
 
-        return false;
-    }
+            if (
+                    serviceRunning
+            ) {
 
-    String reminderText =
-            matcher.group(1).trim();
+                handler.postDelayed(
+                        new Runnable() {
 
-    int hour =
-            Integer.parseInt(
-                    matcher.group(2)
-            );
+                            @Override
+                            public void run() {
 
-    int minute = 0;
-
-    if (
-            matcher.group(3) != null
-    ) {
-
-        minute =
-                Integer.parseInt(
-                        matcher.group(3)
+                                startListening();
+                            }
+                        },
+                        2000
                 );
-    }
-
-    String amPm =
-            matcher.group(4);
-
-    if (
-            amPm != null
-    ) {
-
-        if (
-                amPm.equalsIgnoreCase("pm")
-                &&
-                hour != 12
-        ) {
-
-            hour += 12;
-        }
-
-        if (
-                amPm.equalsIgnoreCase("am")
-                &&
-                hour == 12
-        ) {
-
-            hour = 0;
+            }
         }
     }
 
-    if (
-            hour > 23
-            ||
-            minute > 59
+
+    // ==========================================
+    // COMMAND HANDLER
+    // ==========================================
+
+    private void handleCommand(
+            String command
     ) {
 
-        speak(
-                "Invalid reminder time."
+        if (
+                command == null
+        ) {
+
+            startListening();
+
+            return;
+        }
+
+        command =
+                command.toLowerCase(
+                        Locale.ROOT
+                ).trim();
+
+
+        if (
+                handleTimedReminder(
+                        command
+                )
+        ) {
+
+            return;
+        }
+
+
+        if (
+                command.equals(
+                        "hey jarvis"
+                )
+                ||
+                command.equals(
+                        "hello jarvis"
+                )
+                ||
+                command.equals(
+                        "jarvis"
+                )
+                ||
+                command.equals(
+                        "hello"
+                )
+                ||
+                command.equals(
+                        "hi"
+                )
+        ) {
+
+            speak(
+                    "Yes sir. How can I help you?"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "time"
+                )
+        ) {
+
+            Calendar calendar =
+                    Calendar.getInstance();
+
+            SimpleDateFormat format =
+                    new SimpleDateFormat(
+                            "hh:mm a",
+                            Locale.US
+                    );
+
+            speak(
+                    "The current time is "
+                            +
+                    format.format(
+                            calendar.getTime()
+                    )
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "date"
+                )
+                ||
+                command.contains(
+                        "today"
+                )
+        ) {
+
+            SimpleDateFormat format =
+                    new SimpleDateFormat(
+                            "dd MMMM yyyy",
+                            Locale.US
+                    );
+
+            speak(
+                    "Today is "
+                            +
+                    format.format(
+                            Calendar
+                                    .getInstance()
+                                    .getTime()
+                    )
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "show my reminders"
+                )
+                ||
+                command.contains(
+                        "list my reminders"
+                )
+        ) {
+
+            showReminders();
+        }
+
+
+        else if (
+                command.contains(
+                        "clear all reminders"
+                )
+                ||
+                command.contains(
+                        "delete all reminders"
+                )
+        ) {
+
+            clearAllReminders();
+        }
+
+
+        else if (
+                command.startsWith(
+                        "remind me to "
+                )
+        ) {
+
+            String reminder =
+                    command.substring(
+                            "remind me to "
+                                    .length()
+                    ).trim();
+
+            if (
+                    reminder.isEmpty()
+            ) {
+
+                speak(
+                        "Please tell me the reminder."
+                );
+
+            } else {
+
+                saveSimpleReminder(
+                        reminder
+                );
+
+                speak(
+                        "Okay sir. I saved your reminder."
+                );
+            }
+        }
+
+
+        else if (
+                command.contains(
+                        "open instagram"
+                )
+        ) {
+
+            openApp(
+                    "com.instagram.android",
+                    "Instagram"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "open youtube"
+                )
+        ) {
+
+            openApp(
+                    "com.google.android.youtube",
+                    "YouTube"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "open whatsapp"
+                )
+        ) {
+
+            openApp(
+                    "com.whatsapp",
+                    "WhatsApp"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "open spotify"
+                )
+        ) {
+
+            openApp(
+                    "com.spotify.music",
+                    "Spotify"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "open chrome"
+                )
+        ) {
+
+            openApp(
+                    "com.android.chrome",
+                    "Chrome"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "open settings"
+                )
+        ) {
+
+            openApp(
+                    "com.android.settings",
+                    "Settings"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "open google"
+                )
+        ) {
+
+            openWebsite(
+                    "https://www.google.com",
+                    "Google"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "chatgpt"
+                )
+                ||
+                command.contains(
+                        "chat gpt"
+                )
+        ) {
+
+            openWebsite(
+                    "https://chatgpt.com",
+                    "ChatGPT"
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "thank you"
+                )
+                ||
+                command.contains(
+                        "thanks"
+                )
+        ) {
+
+            speak(
+                    "You are welcome, sir."
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "how are you"
+                )
+        ) {
+
+            speak(
+                    "I am doing great, sir."
+            );
+        }
+
+
+        else if (
+                command.contains(
+                        "who are you"
+                )
+        ) {
+
+            speak(
+                    "I am Jarvis, your Android voice assistant."
+            );
+        }
+
+
+        else if (
+                command.equals(
+                        "go back"
+                )
+                ||
+                command.equals(
+                        "back"
+                )
+        ) {
+
+            goBack();
+        }
+
+
+        else {
+
+            speak(
+                    "I do not understand that command yet, sir."
+            );
+        }
+    }
+
+
+    // ==========================================
+    // TIMED REMINDER
+    // ==========================================
+
+    private boolean handleTimedReminder(
+            String command
+    ) {
+
+        Pattern pattern =
+                Pattern.compile(
+                        "remind me to (.+) at (\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?",
+                        Pattern.CASE_INSENSITIVE
+                );
+
+        Matcher matcher =
+                pattern.matcher(
+                        command
+                );
+
+        if (
+                !matcher.matches()
+        ) {
+
+            return false;
+        }
+
+        String reminderText =
+                matcher.group(1)
+                        .trim();
+
+        int hour =
+                Integer.parseInt(
+                        matcher.group(2)
+                );
+
+        int minute = 0;
+
+        if (
+                matcher.group(3) != null
+        ) {
+
+            minute =
+                    Integer.parseInt(
+                            matcher.group(3)
+                    );
+        }
+
+        String amPm =
+                matcher.group(4);
+
+        if (
+                amPm != null
+        ) {
+
+            if (
+                    amPm.equalsIgnoreCase(
+                            "pm"
+                    )
+                    &&
+                    hour != 12
+            ) {
+
+                hour += 12;
+            }
+
+            if (
+                    amPm.equalsIgnoreCase(
+                            "am"
+                    )
+                    &&
+                    hour == 12
+            ) {
+
+                hour = 0;
+            }
+        }
+
+        if (
+                hour < 0
+                ||
+                hour > 23
+                ||
+                minute < 0
+                ||
+                minute > 59
+        ) {
+
+            speak(
+                    "That is not a valid time."
+            );
+
+            return true;
+        }
+
+        setReminder(
+                reminderText,
+                hour,
+                minute
         );
 
         return true;
     }
 
-    setReminder(
-            reminderText,
-            hour,
-            minute
-    );
 
-    return true;
-}
+    // ==========================================
+    // SET REMINDER
+    // ==========================================
 
-private void setReminder(
-        String reminderText,
-        int hour,
-        int minute
-) {
+    private void setReminder(
+            String reminderText,
+            int hour,
+            int minute
+    ) {
 
-    try {
+        try {
 
-        int reminderId =
-                (int)
-                        (
-                                System.currentTimeMillis()
-                                        / 1000
+            int reminderId =
+                    (int)
+                    (
+                            System.currentTimeMillis()
+                                    / 1000
+                    );
+
+            Intent intent =
+                    new Intent(
+                            this,
+                            ReminderReceiver.class
+                    );
+
+            intent.putExtra(
+                    "reminder",
+                    reminderText
+            );
+
+            PendingIntent pendingIntent =
+                    PendingIntent.getBroadcast(
+                            this,
+                            reminderId,
+                            intent,
+                            PendingIntent
+                                    .FLAG_UPDATE_CURRENT
+                                    |
+                            PendingIntent
+                                    .FLAG_IMMUTABLE
+                    );
+
+            Calendar calendar =
+                    Calendar.getInstance();
+
+            calendar.set(
+                    Calendar.HOUR_OF_DAY,
+                    hour
+            );
+
+            calendar.set(
+                    Calendar.MINUTE,
+                    minute
+            );
+
+            calendar.set(
+                    Calendar.SECOND,
+                    0
+            );
+
+            calendar.set(
+                    Calendar.MILLISECOND,
+                    0
+            );
+
+            if (
+                    calendar.getTimeInMillis()
+                            <=
+                    System.currentTimeMillis()
+            ) {
+
+                calendar.add(
+                        Calendar.DAY_OF_YEAR,
+                        1
+                );
+            }
+
+            AlarmManager alarmManager =
+                    (AlarmManager)
+                    getSystemService(
+                            ALARM_SERVICE
+                    );
+
+            if (
+                    alarmManager != null
+            ) {
+
+                alarmManager
+                        .setAndAllowWhileIdle(
+                                AlarmManager
+                                        .RTC_WAKEUP,
+                                calendar
+                                        .getTimeInMillis(),
+                                pendingIntent
                         );
+            }
 
-        Intent intent =
-                new Intent(
-                        this,
-                        ReminderReceiver.class
-                );
+            saveReminder(
+                    reminderId,
+                    reminderText
+            );
 
-        intent.putExtra(
-                "reminder",
-                reminderText
-        );
+            speak(
+                    "Okay sir. I will remind you at "
+                            +
+                    formatTime(
+                            hour,
+                            minute
+                    )
+            );
 
-        PendingIntent pendingIntent =
-                PendingIntent.getBroadcast(
-                        this,
-                        reminderId,
-                        intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT
-                                |
-                        PendingIntent.FLAG_IMMUTABLE
-                );
+        } catch (
+                Exception e
+        ) {
+
+            speak(
+                    "I could not set the reminder."
+            );
+        }
+    }
+
+
+    // ==========================================
+    // FORMAT TIME
+    // ==========================================
+
+    private String formatTime(
+            int hour,
+            int minute
+    ) {
 
         Calendar calendar =
                 Calendar.getInstance();
@@ -665,205 +1006,190 @@ private void setReminder(
                 minute
         );
 
-        calendar.set(
-                Calendar.SECOND,
-                0
-        );
-
-        if (
-                calendar.getTimeInMillis()
-                <=
-                System.currentTimeMillis()
-        ) {
-
-            calendar.add(
-                    Calendar.DAY_OF_YEAR,
-                    1
-            );
-        }
-
-        AlarmManager alarmManager =
-                (AlarmManager)
-                        getSystemService(
-                                ALARM_SERVICE
-                        );
-
-        if (
-                alarmManager != null
-        ) {
-
-            if (
-                    Build.VERSION.SDK_INT
-                    >=
-                    Build.VERSION_CODES.S
-                    &&
-                    !alarmManager
-                            .canScheduleExactAlarms()
-            ) {
-
-                alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        calendar.getTimeInMillis(),
-                        pendingIntent
+        SimpleDateFormat format =
+                new SimpleDateFormat(
+                        "hh:mm a",
+                        Locale.US
                 );
 
-            } else {
+        return format.format(
+                calendar.getTime()
+        );
+    }
 
-                alarmManager
-                        .setExactAndAllowWhileIdle(
-                                AlarmManager.RTC_WAKEUP,
-                                calendar
-                                        .getTimeInMillis(),
-                                pendingIntent
-                        );
-            }
-        }
 
-        saveReminder(
-                reminderId,
+    // ==========================================
+    // SAVE REMINDER
+    // ==========================================
+
+    private void saveReminder(
+            int reminderId,
+            String reminderText
+    ) {
+
+        Set<String> oldReminders =
+                memory.getStringSet(
+                        "reminders",
+                        new HashSet<>()
+                );
+
+        Set<String> reminders =
+                new HashSet<>(
+                        oldReminders
+                );
+
+        reminders.add(
+                reminderId
+                        +
+                "|"
+                        +
                 reminderText
         );
 
-        speak(
-                "Reminder set for "
-                        +
-                formatTime(
-                        hour,
-                        minute
+        memory.edit()
+                .putStringSet(
+                        "reminders",
+                        reminders
                 )
-        );
-
-    } catch (
-            Exception e
-    ) {
-
-        speak(
-                "I could not set the reminder."
-        );
-    }
-}
-
-private void saveReminder(
-        int reminderId,
-        String reminderText
-) {
-
-    Set<String> oldReminders =
-            memory.getStringSet(
-                    "reminders",
-                    new HashSet<>()
-            );
-
-    Set<String> newReminders =
-            new HashSet<>(
-                    oldReminders
-            );
-
-    newReminders.add(
-            reminderId
-                    +
-            "|"
-                    +
-            reminderText
-    );
-
-    memory.edit()
-            .putStringSet(
-                    "reminders",
-                    newReminders
-            )
-            .apply();
-}
-
-private void saveSimpleReminder(
-        String reminder
-) {
-
-    memory.edit()
-            .putString(
-                    "reminder",
-                    reminder
-            )
-            .apply();
-}
-
-private void showReminders() {
-
-    Set<String> reminders =
-            memory.getStringSet(
-                    "reminders",
-                    new HashSet<>()
-            );
-
-    if (
-            reminders.isEmpty()
-    ) {
-
-        speak(
-                "You have no reminders."
-        );
-
-        return;
+                .apply();
     }
 
-    StringBuilder result =
-            new StringBuilder(
-                    "Your reminders are. "
-            );
 
-    for (
-            String item : reminders
+    // ==========================================
+    // SIMPLE REMINDER
+    // ==========================================
+
+    private void saveSimpleReminder(
+            String reminder
     ) {
 
-        String[] parts =
-                item.split(
-                        "\\|",
-                        2
+        memory.edit()
+                .putString(
+                        "reminder",
+                        reminder
+                )
+                .apply();
+    }
+
+
+    // ==========================================
+    // SHOW REMINDERS
+    // ==========================================
+
+    private void showReminders() {
+
+        Set<String> reminders =
+                memory.getStringSet(
+                        "reminders",
+                        new HashSet<>()
+                );
+
+        String simpleReminder =
+                memory.getString(
+                        "reminder",
+                        ""
                 );
 
         if (
-                parts.length == 2
+                reminders.isEmpty()
+                &&
+                simpleReminder.isEmpty()
+        ) {
+
+            speak(
+                    "You have no saved reminders."
+            );
+
+            return;
+        }
+
+        StringBuilder result =
+                new StringBuilder(
+                        "Your reminders are. "
+                );
+
+        for (
+                String reminder :
+                reminders
+        ) {
+
+            String[] parts =
+                    reminder.split(
+                            "\\|",
+                            2
+                    );
+
+            if (
+                    parts.length == 2
+            ) {
+
+                result.append(
+                        parts[1]
+                );
+
+                result.append(
+                        ". "
+                );
+            }
+        }
+
+        if (
+                !simpleReminder.isEmpty()
         ) {
 
             result.append(
-                    parts[1]
-            )
-            .append(". ");
+                    simpleReminder
+            );
+
+            result.append(
+                    ". "
+            );
         }
+
+        speak(
+                result.toString()
+        );
     }
 
-    speak(
-            result.toString()
-    );
-}
 
-private void clearAllReminders() {
+    // ==========================================
+    // CLEAR REMINDERS
+    // ==========================================
 
-    memory.edit()
-            .remove("reminders")
-            .remove("reminder")
-            .apply();
+    private void clearAllReminders() {
 
-    speak(
-            "All reminders cleared."
-    );
-}
+        memory.edit()
+                .remove(
+                        "reminders"
+                )
+                .remove(
+                        "reminder"
+                )
+                .apply();
 
-private void openApp(
-        String packageName,
-        String appName
-) {
+        speak(
+                "All reminders have been cleared."
+        );
+    }
 
-    try {
 
-        Intent intent =
+    // ==========================================
+    // OPEN APPLICATION
+    // ==========================================
+
+    private void openApp(
+            String packageName,
+            String appName
+    ) {
+
+        Intent launchIntent =
                 getPackageManager()
                         .getLaunchIntentForPackage(
                                 packageName
                         );
 
         if (
-                intent == null
+                launchIntent == null
         ) {
 
             speak(
@@ -875,12 +1201,12 @@ private void openApp(
             return;
         }
 
-        intent.addFlags(
+        launchIntent.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK
         );
 
         startActivity(
-                intent
+                launchIntent
         );
 
         speak(
@@ -888,247 +1214,247 @@ private void openApp(
                         +
                 appName
         );
-
-    } catch (
-            Exception e
-    ) {
-
-        speak(
-                "I could not open "
-                        +
-                appName
-        );
-    }
-}
-
-private void controlMusic(
-        int keyCode
-) {
-
-    try {
-
-        AudioManager audioManager =
-                (AudioManager)
-                        getSystemService(
-                                AUDIO_SERVICE
-                        );
-
-        if (
-                audioManager == null
-        ) {
-
-            return;
-        }
-
-        long time =
-                android.os.SystemClock
-                        .uptimeMillis();
-
-        audioManager
-                .dispatchMediaKeyEvent(
-                        new KeyEvent(
-                                time,
-                                time,
-                                KeyEvent.ACTION_DOWN,
-                                keyCode,
-                                0
-                        )
-                );
-
-        audioManager
-                .dispatchMediaKeyEvent(
-                        new KeyEvent(
-                                time,
-                                time,
-                                KeyEvent.ACTION_UP,
-                                keyCode,
-                                0
-                        )
-                );
-
-    } catch (
-            Exception ignored
-    ) {
-    }
-}
-
-private void speak(
-        String text
-) {
-
-    if (
-            serviceDestroyed
-    ) {
-
-        return;
     }
 
-    isSpeaking = true;
 
-    if (
-            textToSpeech != null
-    ) {
+    // ==========================================
+    // OPEN WEBSITE
+    // ==========================================
 
-        textToSpeech.speak(
-                text,
-                TextToSpeech.QUEUE_FLUSH,
-                null,
-                "JARVIS"
-        );
-    }
-
-    handler.removeCallbacksAndMessages(
-            null
-    );
-
-    handler.postDelayed(
-            () -> {
-
-                isSpeaking = false;
-
-                startListening();
-
-            },
-            3000
-    );
-}
-
-@Override
-public void onInit(
-        int status
-) {
-
-    if (
-            status
-            ==
-            TextToSpeech.SUCCESS
-    ) {
-
-        textToSpeech.setLanguage(
-                Locale.US
-        );
-
-        speak(
-                "Hello. Jarvis is ready."
-        );
-    }
-}
-
-private String formatTime(
-        int hour,
-        int minute
-) {
-
-    String period =
-            hour >= 12
-                    ?
-            "PM"
-                    :
-            "AM";
-
-    int displayHour =
-            hour % 12;
-
-    if (
-            displayHour == 0
-    ) {
-
-        displayHour = 12;
-    }
-
-    return String.format(
-            Locale.US,
-            "%d:%02d %s",
-            displayHour,
-            minute,
-            period
-    );
-}
-
-private void createNotificationChannel() {
-
-    if (
-            Build.VERSION.SDK_INT
-            >=
-            Build.VERSION_CODES.O
-    ) {
-
-        NotificationChannel channel =
-                new NotificationChannel(
-                        CHANNEL_ID,
-                        "Jarvis Service",
-                        NotificationManager
-                                .IMPORTANCE_LOW
-                );
-
-        NotificationManager manager =
-                getSystemService(
-                        NotificationManager.class
-                );
-
-        if (
-                manager != null
-        ) {
-
-            manager.createNotificationChannel(
-                    channel
-            );
-        }
-    }
-}
-
-@Override
-public void onDestroy() {
-
-    serviceDestroyed = true;
-
-    if (
-            handler != null
-    ) {
-
-        handler.removeCallbacksAndMessages(
-                null
-        );
-    }
-
-    if (
-            speechRecognizer != null
+    private void openWebsite(
+            String url,
+            String name
     ) {
 
         try {
 
-            speechRecognizer.cancel();
+            Intent intent =
+                    new Intent(
+                            Intent.ACTION_VIEW
+                    );
+
+            intent.setData(
+                    android.net.Uri.parse(
+                            url
+                    )
+            );
+
+            intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+            );
+
+            startActivity(
+                    intent
+            );
+
+            speak(
+                    "Opening "
+                            +
+                    name
+            );
+
+        } catch (
+                Exception e
+        ) {
+
+            speak(
+                    "I could not open "
+                            +
+                    name
+            );
+        }
+    }
+
+
+    // ==========================================
+    // SPEAK
+    // ==========================================
+
+    private void speak(
+            String text
+    ) {
+
+        isSpeaking = true;
+
+        if (
+                speechRecognizer != null
+        ) {
+
+            try {
+
+                speechRecognizer
+                        .cancel();
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+        if (
+                textToSpeech != null
+        ) {
+
+            textToSpeech.speak(
+                    text,
+                    TextToSpeech
+                            .QUEUE_FLUSH,
+                    null,
+                    "JARVIS_SPEECH"
+            );
+        }
+
+        handler.postDelayed(
+                new Runnable() {
+
+                    @Override
+                    public void run() {
+
+                        isSpeaking = false;
+
+                        startListening();
+                    }
+                },
+                3000
+        );
+    }
+
+
+    // ==========================================
+    // TEXT TO SPEECH READY
+    // ==========================================
+
+    @Override
+    public void onInit(
+            int status
+    ) {
+
+        if (
+                status ==
+                TextToSpeech.SUCCESS
+        ) {
+
+            textToSpeech.setLanguage(
+                    Locale.US
+            );
+        }
+    }
+
+
+    // ==========================================
+    // GO HOME
+    // ==========================================
+
+    private void goBack() {
+
+        Intent intent =
+                new Intent(
+                        Intent.ACTION_MAIN
+                );
+
+        intent.addCategory(
+                Intent.CATEGORY_HOME
+        );
+
+        intent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+        );
+
+        startActivity(
+                intent
+        );
+    }
+
+
+    // ==========================================
+    // NOTIFICATION CHANNEL
+    // ==========================================
+
+    private void createNotificationChannel() {
+
+        if (
+                Build.VERSION.SDK_INT
+                        >=
+                Build.VERSION_CODES.O
+        ) {
+
+            NotificationChannel channel =
+                    new NotificationChannel(
+                            CHANNEL_ID,
+                            "Jarvis Background Service",
+                            NotificationManager
+                                    .IMPORTANCE_LOW
+                    );
+
+            NotificationManager manager =
+                    getSystemService(
+                            NotificationManager.class
+                    );
+
+            if (
+                    manager != null
+            ) {
+
+                manager
+                        .createNotificationChannel(
+                                channel
+                        );
+            }
+        }
+    }
+
+
+    // ==========================================
+    // DESTROY SERVICE
+    // ==========================================
+
+    @Override
+    public void onDestroy() {
+
+        serviceRunning = false;
+
+        if (
+                handler != null
+        ) {
+
+            handler.removeCallbacksAndMessages(
+                    null
+            );
+        }
+
+        if (
+                speechRecognizer != null
+        ) {
 
             speechRecognizer.destroy();
 
-        } catch (
-                Exception ignored
-        ) {
+            speechRecognizer = null;
         }
 
-        speechRecognizer = null;
+        if (
+                textToSpeech != null
+        ) {
+
+            textToSpeech.stop();
+
+            textToSpeech.shutdown();
+
+            textToSpeech = null;
+        }
+
+        stopForeground(
+                true
+        );
+
+        super.onDestroy();
     }
 
-    if (
-            textToSpeech != null
+
+    @Override
+    public IBinder onBind(
+            Intent intent
     ) {
 
-        textToSpeech.stop();
-
-        textToSpeech.shutdown();
-
-        textToSpeech = null;
+        return null;
     }
-
-    super.onDestroy();
-}
-
-@Override
-public IBinder onBind(
-        Intent intent
-) {
-
-    return null;
-}
-
 }
