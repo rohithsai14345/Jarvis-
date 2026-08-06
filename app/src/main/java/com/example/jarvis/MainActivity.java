@@ -316,7 +316,7 @@ public class MainActivity extends AppCompatActivity {
     // START JARVIS SERVICE
     // ==========================================
 
-    private void startjarvisService() {
+    private void startJarvisService() {
 
         Intent serviceIntent =
                 new Intent(
