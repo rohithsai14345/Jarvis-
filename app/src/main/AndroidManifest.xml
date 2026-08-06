@@ -45,7 +45,7 @@
         </activity>
 
         <service
-            android:name=".JarvisService"
+            android:name=".jarvisService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
