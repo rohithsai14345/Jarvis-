@@ -35,7 +35,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class jarvisService extends Service
+public class JarvisService extends Service
         implements TextToSpeech.OnInitListener {
 
     private static final String CHANNEL_ID =
